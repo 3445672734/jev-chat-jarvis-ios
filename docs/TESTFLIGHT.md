@@ -1,6 +1,6 @@
 # TestFlight 分发手册（借他人开发者账号版）
 
-给想把「秒回」键盘发给一批人试用、但账号不是自己名下付费账号的情况。按顺序读，第 1 步的答案会决定后面走哪条路。
+给想把 Jev Jarvis 键盘发给一批人试用、但账号不是自己名下付费账号的情况。按顺序读，第 1 步的答案会决定后面走哪条路。
 
 ---
 
@@ -30,7 +30,7 @@
 
 `App/Assets.xcassets/AppIcon.appiconset` 已就位：iPhone 全部尺寸 + 一张 **1024×1024** 的 App Store 槽位；`project.yml` 里 `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` 与新的 `App/Assets.xcassets` source 都已生效（改 `project.yml` 后记得 `xcodegen generate`）。
 
-图标沿用 macOS 版设计（微信绿底 + 白色 J + 气泡尾巴），由 `tools/MakeAppIcon/main.swift` 画出：
+图标沿用 macOS 版设计（绿色底色 + 白色 J + 气泡尾巴），由 `tools/MakeAppIcon/main.swift` 画出：
 
 ```bash
 swiftc -O -o /tmp/makeappicon tools/MakeAppIcon/main.swift && /tmp/makeappicon App/Assets.xcassets/AppIcon.appiconset
@@ -70,25 +70,17 @@ swiftc -O -o /tmp/makeappicon tools/MakeAppIcon/main.swift && /tmp/makeappicon A
 
 放进去后同样要在 `project.yml` 的 sources 里显式带上（xcodegen 生成工程时容易漏，`ITMS-91053` 的常见原因就是清单没进 Copy Bundle Resources）。
 
-> 另外：键盘会把剪贴板文本发到中转服务器，严格来说属于「收集用户内容」。要不要在 `NSPrivacyCollectedDataTypes` 里如实申报，是个判断题 —— 建议申报（`NSPrivacyCollectedDataTypeOtherUserContent`，用途 App Functionality），理由是自己主动声明的成本远低于被审核问。
+> 另外：用户主动点「分析」后，键盘会把剪贴板文本发到用户配置的模型服务。请按实际数据流填写 `NSPrivacyCollectedDataTypes`（可评估 `NSPrivacyCollectedDataTypeOtherUserContent`，用途 App Functionality），并在审核说明里讲清楚触发方式和服务提供方。
 
-### 1.3 硬编码的 `sk-` key —— 分发即公开，必须换掉
+### 1.3 历史上提交过的 API Key —— 必须撤销轮换
 
-`Shared/JevModel.swift` 的 `JevBuiltin.apiKey` 是写死的真实 key，**而且已经在 git 历史里**（commit `5b425a4`）。TestFlight 的包是分发给测试者的，任何人 unzip `.ipa` 或 `strings` 一下就能拿到，直接刷你的中转额度。
+项目曾把真实 API Key 硬编码进源码，并提交到了 Git 历史（commit `5b425a4`）。虽然当前代码已移除内置凭据和中转回退，删除源码不会清除历史记录；应将旧 Key 视为已泄露并在对应服务商后台撤销、轮换。不要把新 Key 写进 App 源码或仓库，用户应在 App 的模型设置中自行填写。
 
-代码注释自己已经写明了正确做法：内置的必须是**专用 token**（模型白名单 + 额度封顶 + 过期时间），不是主账号 key。发出去之前：
+### 1.4 `NSAllowsArbitraryLoads = true` 与 HTTP 服务
 
-1. 在中转后台建一个**专供分发的 token**：只允许 `glm-4-flash`、日额度封顶、设过期时间
-2. 换掉 `JevBuiltin.apiKey`
-3. **旧 key 视为已泄露，去中转后台吊销重建**（它在 git 历史里，删文件没用）
+两个 target 的 Info.plist 都开了 `NSAllowsArbitraryLoads`，主要用于兼容用户自行配置的本地 Ollama 等 HTTP 服务。项目不再提供中转服务；正式使用优先配置 HTTPS 模型端点。键盘只在用户主动分析时发送选中的消息内容，审核备注应准确说明数据接收方和传输方式（Guidelines 4.4.1 要求键盘安全传输数据）。
 
-> 保留内置兜底是对的 —— 审核员不会帮你填 API Key，开箱能出候选才过得了审。前提是那个 token 是可控的。
-
-### 1.4 `NSAllowsArbitraryLoads = true` + 明文 HTTP 中转 —— 最大的审核风险
-
-两个 target 的 Info.plist 都开了 `NSAllowsArbitraryLoads`，而内置中转是 `http://101.132.131.220:11111/v1`（**明文 HTTP + 裸 IP + 非标端口**）。键盘扩展发的是用户输入的聊天内容，苹果对「键盘把数据明文发出去」这事很敏感（Guidelines 4.4.1 要求键盘「Transmit securely」）。
-
-建议给中转加 HTTPS 再做外部测试。短期过审的降级方案是保留 ATS 例外但在审核备注里写清用途；但这是被拒的高概率点，别指望一次过。
+若发布版本不需要 HTTP 端点，收紧 ATS 例外并确认本地服务预设仍符合预期。
 
 ### 1.5 版本号 / 设备族 / scheme
 
@@ -111,6 +103,8 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 
 两者必须在 `NSExtensionAttributes` 里：`RequestsOpenAccess` 缺了 → 设置里根本不显示「允许完全访问」开关；`PrimaryLanguage` 缺了 → 键盘弹起时宿主 App 直接闪退。
 
+> ⚠️ `PrimaryLanguage` 的值也有讲究：**不要用 `zh-Hans`**。听写语言未启用 `zh-Hans` 的设备（典型：英文系统、没装中文听写）上，系统 TextInput 查该键盘的听写语言拿到 nil，`setObject:forKey:` 传 nil 直接把宿主 App 崩掉（审核就是以「启动崩溃」拒的，App Store 审核设备基本都是这个环境）。**用 `en-US`**——英文听写元数据所有设备都有。崩溃签名同样是 `TIGetDefaultDictationLanguagesForKeyboardLanguage`。
+
 ---
 
 ## 2. 账号侧的一次性配置
@@ -119,9 +113,9 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 
 | 步骤 | 谁做 | 说明 |
 |---|---|---|
-| 1. 注册 App ID | 个人账号只有朋友能做 | 门户 → Identifiers → 新建 App ID，Bundle ID 用 **explicit** `com.jevchat.jarvis.ios`（键盘扩展的 `com.jevchat.jarvis.ios.keyboard` 可一起建，也可由 Xcode 自动建） |
-| 2. 注册 App Group | 同上 | 门户 → Identifiers → App Groups → 新建 `group.com.jevchat.jarvis.ios`，**建完要勾选进上面那个 App ID**（漏这步签名会报 entitlement 不匹配） |
-| 3. 建 App 记录 | 朋友或你的 App Manager 角色 | ASC → My Apps → **+** → New App。Platform iOS / Name `秒回` / Primary Language 简体中文 / Bundle ID 选第 1 步那个 / SKU 随便填唯一串 |
+| 1. 注册 App ID | 个人账号只有朋友能做 | 门户 → Identifiers → 新建 App ID，Bundle ID 用 **explicit** `com.jevchat.jarvis`，并为键盘扩展注册 `com.jevchat.jarvis.keyboard` |
+| 2. 注册 App Group | 同上 | 门户 → Identifiers → App Groups → 注册或选用 `group.com.jevchat.jarvis`，**同时授权给 App 和键盘扩展两个 App ID**（漏这步签名会报 entitlement 不匹配） |
+| 3. 建 App 记录 | 朋友或你的 App Manager 角色 | ASC → My Apps → **+** → New App。Platform iOS / Name `Jev Jarvis` / Primary Language 简体中文 / Bundle ID 选第 1 步那个 / SKU 随便填唯一串 |
 | 4. 把你加成 ASC 用户 | 朋友 | ASC → Users and Access → **+**。角色给 **App Manager**（够用）或 **Admin**。邀请链接 3 天过期 |
 | 5. （个人账号走这条）生成 Team API Key | 朋友 | ASC → Users and Access → **Integrations** → App Store Connect API → **Team Keys** → **+**。下载 `.p8`（**只能下一次**），记下 Key ID 和 Issuer ID |
 
@@ -215,15 +209,15 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 
 ## 5. 给测试者的说明（直接复制发出去）
 
-> **装「秒回」试用版**
+> **装 Jev 键盘试用版**
 >
 > 1. 先在 App Store 装 **TestFlight**（苹果官方的测试工具）
 > 2. 用 iPhone 点开这个链接：`https://testflight.apple.com/join/XXXXXXXX`
-> 3. 在 TestFlight 里点「安装」，装好后**先打开一次「秒回」**（不打开的话下一步在设置里找不到键盘）
-> 4. 设置 → 通用 → 键盘 → 键盘 → **添加新键盘** → 选「**秒回键盘**」
-> 5. 回到键盘列表，点「**秒回键盘**」→ 打开「**允许完全访问**」→ 弹窗点「允许」
+> 3. 在 TestFlight 里点「安装」，装好后**先打开一次 Jev Jarvis**（不打开的话下一步在设置里找不到键盘）
+> 4. 设置 → 通用 → 键盘 → 键盘 → **添加新键盘** → 选「**Jev 键盘**」
+> 5. 回到键盘列表，点「**Jev 键盘**」→ 打开「**允许完全访问**」→ 弹窗点「允许」
 >    - 这个开关是必须的：键盘要联网才能生成候选回复，也要读剪贴板拿到你要分析的那条消息。系统弹窗的措辞看着吓人（"开发者可能访问你输入的内容"），实际只会把**你主动点「分析剪贴板」时**的那条消息发去生成回复。
-> 6. 在任意聊天窗口长按一条消息 → 复制 → 切到秒回键盘（长按左下角地球键）→ 点「分析剪贴板」
+> 6. 在任意聊天窗口长按一条消息 → 复制 → 切到 Jev 键盘（长按左下角地球键）→ 点「分析剪贴板」
 > 7. 候选出来点一下就插进输入框；点「发送」试它认不认换行（有的 App 不认）
 >
 > 有效期 90 天，到期我会发新的，重装一下就好。
@@ -238,11 +232,11 @@ plutil -p /tmp/JevJarvis.xcarchive/Products/Applications/JevJarvis.app/PlugIns/J
 | 上传后收到 `ITMS-91053` 邮件 | 缺隐私清单，或清单没进 Copy Bundle Resources | 见 1.2 |
 | `The bundle version must be higher than...` | build number 没递增 | 改 `CURRENT_PROJECT_VERSION` |
 | 设置里找不到「允许完全访问」开关 | `RequestsOpenAccess` 放错层级（必须在 `NSExtension` → `NSExtensionAttributes` 里） | 改 `project.yml` 后 `xcodegen generate` |
-| 点输入框、键盘弹起时宿主 App 闪退 | `NSExtensionAttributes` 缺 `PrimaryLanguage` | 同上；崩溃签名是 `TIGetDefaultDictationLanguagesForKeyboardLanguage` |
-| 设置里看不到秒回键盘 | 装完没打开过宿主 App | 让测试者先启动一次 App |
+| 点输入框、键盘弹起时宿主 App 闪退 | `NSExtensionAttributes` 缺 `PrimaryLanguage`，或 `PrimaryLanguage` 是 `zh-Hans` 且设备听写语言未启用 | 缺失→补上；是 `zh-Hans`→改 `en-US`（见 1.x 的警告）；崩溃签名是 `TIGetDefaultDictationLanguagesForKeyboardLanguage` |
+| 设置里看不到 Jev 键盘 | 装完没打开过宿主 App | 让测试者先启动一次 App |
 | 签名报 entitlement 不匹配 | App Group 建了但没勾进 App ID | 回门户把 App Group 关联到 App ID |
 | 外部测试者点链接提示不可用 | 第一个 build 还在 Beta App Review / 已过 90 天 | 看 ASC 的 TestFlight 状态 |
-| 被审核拒 | 明文 HTTP 发用户内容（4.4.1 「Transmit securely」） | 中转上 HTTPS，见 1.4 |
+| 被审核拒 | 用户配置的 HTTP 端点传输聊天内容（4.4.1 「Transmit securely」） | 优先使用 HTTPS，并准确填写审核说明，见 1.4 |
 
 ---
 

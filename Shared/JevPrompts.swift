@@ -104,11 +104,11 @@ func orderedToneNames(custom: [String: String]) -> [String] {
     return names
 }
 
-// MARK: - 起草 prompt（与 macOS 版 src/generate.py PROMPT_ONE 逐字一致）
+// MARK: - 起草 prompt（沿用 macOS 版结构，面向通用聊天场景）
 
 /// {n} 出现两次是刻意的：「只要 n 行」的要求必须与条数一致，否则模型会自己凑一行。
 let PROMPT_ONE = """
-刚收到一条微信消息，你要帮我回。
+刚收到一条聊天消息，你要帮我回。
 
 {context_line}消息：「{message}」
 {intent_line}
@@ -117,21 +117,49 @@ let PROMPT_ONE = """
 
 硬性要求：
 - 前一条稳妥、可以直接发出去；后一条把这个语气做足，更皮、更夸张一点也行
-- 每条不超过 30 个字，是微信里打字的语气，不要客套话、不要解释
+- 每条不超过 30 个字，像日常聊天时打字的语气，不要客套话、不要解释
 - 只输出 {n} 行，每行一条，不要编号、不要引号、不要任何前后缀
 - 不要写出语气名称（不要写「{tone}：」这类前缀），直接从回复内容开始
 """
 
+let PROMPT_ONE_EN = """
+You just received a chat message and need to reply.
+
+{context_line}Message: “{message}”
+{intent_line}
+Write {n} reply candidates in the same tone below, with different levels of boldness:
+“{tone}” {instruction}
+
+Hard requirements:
+- Write every reply in English, regardless of the language of the message
+- The first reply should be safe to send; the second should use the tone more strongly and may be more playful
+- Keep each reply under 30 words, like everyday chat. No formal filler or explanations
+- Output only {n} lines, one reply per line, with no numbering, quotes, or prefixes
+- Do not write the tone name (do not add a prefix such as “{tone}:”); start with the reply itself
+"""
+
 func buildDraftPrompt(message: String, intent: String?, context: String?,
-                      tone: String, instruction: String, n: Int) -> String {
-    let contextLine = context != nil && !(context ?? "").isEmpty ? "最近的对话：\n\(context!)\n\n" : ""
-    let intentLine = intent != nil && !(intent ?? "").isEmpty ? "判断出的意图：\(intent!)\n" : ""
-    return PROMPT_ONE
+                      tone: String, instruction: String, n: Int,
+                      language: JevLanguage? = nil) -> String {
+    let selectedLanguage = language ?? JevStore.loadLanguage()
+    let contextLine: String
+    let intentLine: String
+    if selectedLanguage == .english {
+        contextLine = context != nil && !(context ?? "").isEmpty ? "Recent conversation:\n\(context!)\n\n" : ""
+        intentLine = intent != nil && !(intent ?? "").isEmpty ? "Detected intent: \(localizedIntent(intent!, language: .english))\n" : ""
+    } else {
+        contextLine = context != nil && !(context ?? "").isEmpty ? "最近的对话：\n\(context!)\n\n" : ""
+        intentLine = intent != nil && !(intent ?? "").isEmpty ? "判断出的意图：\(intent!)\n" : ""
+    }
+    let template = selectedLanguage == .english ? PROMPT_ONE_EN : PROMPT_ONE
+    let promptInstruction = selectedLanguage == .english && BUILTIN_TONES[tone] == instruction
+        ? toneEnglishDescription(tone) : instruction
+    return template
         .replacingOccurrences(of: "{context_line}", with: contextLine)
         .replacingOccurrences(of: "{message}", with: message)
         .replacingOccurrences(of: "{intent_line}", with: intentLine)
         .replacingOccurrences(of: "{tone}", with: tone)
-        .replacingOccurrences(of: "{instruction}", with: instruction)
+        .replacingOccurrences(of: "{instruction}", with: promptInstruction)
         .replacingOccurrences(of: "{n}", with: String(n))
 }
 

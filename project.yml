@@ -11,9 +11,9 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: XZWGHPX856
-    CURRENT_PROJECT_VERSION: "1"
-    MARKETING_VERSION: "0.1.0"
+    DEVELOPMENT_TEAM: 75LZ93U5CF
+    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "0.2.0"
     GENERATE_INFOPLIST_FILE: false
 
 targets:
@@ -26,14 +26,15 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/JevJarvis.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: 秒回
+        CFBundleDisplayName: Jev Jarvis
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
@@ -46,7 +47,7 @@ targets:
       path: App/JevJarvis.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.jevchat.jarvis.ios
+          - group.com.jevchat.jarvis
     dependencies:
       - target: JevKeyboard
       - target: JevLive
@@ -59,14 +60,15 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.ios.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.keyboard
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Keyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: Keyboard/JevKeyboard.entitlements
         SKIP_INSTALL: true
     info:
       path: Keyboard/Info.plist
       properties:
-        CFBundleDisplayName: 秒回键盘
+        CFBundleDisplayName: Jev 键盘
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSAppTransportSecurity:
@@ -75,7 +77,11 @@ targets:
           NSExtensionAttributes:
             IsASCIICapable: false
             PrefersRightToLeft: false
-            PrimaryLanguage: zh-Hans
+            # PrimaryLanguage 必须有值(缺失会让键盘弹起时宿主直接崩),但也不能用 zh-Hans:
+            # 审核环境(英文系统/听写语言未启用)查 zh-Hans 的听写语言拿到 nil,系统 TextInput
+            # 会以 setObject:forKey: 传 nil 把宿主 App 崩掉(2026-09-23 真机 6 连崩实证)。
+            # en-US 的听写元数据所有设备都有,规避这条系统 bug;键盘 UI 本身仍是中文。
+            PrimaryLanguage: en-US
             RequestsOpenAccess: true
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
@@ -83,9 +89,9 @@ targets:
       path: Keyboard/JevKeyboard.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.jevchat.jarvis.ios
+          - group.com.jevchat.jarvis
 
-  # 直播模式（实验）：ReplayKit 广播上传扩展。录屏 → 本地 OCR → 快照写 App Group。
+  # 直播模式：ReplayKit 广播上传扩展。录屏 → 本地 OCR → 快照写 App Group。
   # 只挂 Shared/JevLive.swift 一个共享文件，别把整条管线拖进 50MB 内存上限的进程。
   JevLive:
     type: app-extension
@@ -95,14 +101,15 @@ targets:
       - path: Shared/JevLive.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.ios.live
+        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.live
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Broadcast/Info.plist
         CODE_SIGN_ENTITLEMENTS: Broadcast/JevLive.entitlements
         SKIP_INSTALL: true
     info:
       path: Broadcast/Info.plist
       properties:
-        CFBundleDisplayName: 秒回直播
+        CFBundleDisplayName: Jev 直播
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
@@ -112,10 +119,11 @@ targets:
       path: Broadcast/JevLive.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.jevchat.jarvis.ios
+          - group.com.jevchat.jarvis
 
   # 真机 UI 自动化：USB 连着手机 `xcodebuild test -scheme JevJarvis` 全自动回归直播链路。
   # 测试器会往系统广播面板（SpringBoard 进程）里点「开始/停止直播」，手机需解锁且别拔线。
+  # 注意：广播面板在模拟器上永远不弹（系统不支持），这块只能真机验证。
   JevJarvisUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -125,7 +133,7 @@ targets:
       - target: JevJarvis
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.ios.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.jevchat.jarvis.uitests
         GENERATE_INFOPLIST_FILE: true
         TEST_TARGET_NAME: JevJarvis
 
@@ -140,3 +148,7 @@ schemes:
       config: Debug
       targets:
         - JevJarvisUITests
+  JevKeyboard:
+    build:
+      targets:
+        JevKeyboard: all

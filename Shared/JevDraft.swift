@@ -9,7 +9,7 @@ import Foundation
 final class JevDraft {
     private let cfg: JevConfig
 
-    /// 采样温度。对齐 macOS 版 `src/generate.py` 的 0.9：内置中转和部分渠道把范围夹在 [0,1]，
+    /// 采样温度。对齐 macOS 版 `src/generate.py` 的 0.9：部分渠道把范围夹在 [0,1]，
     /// 发 1.2 会被上游直接拒（400 temperature参数非法）。
     private static let temperature: Double = 0.9
 
@@ -106,8 +106,9 @@ final class JevDraft {
             }
             let reasoning = (msg["reasoning_content"] ?? msg["reasoning"]) as? String
             if let r = reasoning, !r.isEmpty {
-                throw JevError.thinkingOnly(
-                    "「\(model)」是思考型模型：思考占满了额度，正文 0 条；请换非思考模型（如 deepseek-chat、glm-4-flash）")
+                throw JevError.thinkingOnly(JevStore.loadLanguage() == .english
+                    ? "“\(model)” is a reasoning model: its thinking consumed the budget and returned 0 replies. Switch to a non-reasoning model (e.g. deepseek-chat, glm-4-flash)"
+                    : "「\(model)」是思考型模型：思考占满了额度，正文 0 条；请换非思考模型（如 deepseek-chat、glm-4-flash）")
             }
             throw JevError.emptyReply
         case .anthropic:

@@ -3,7 +3,7 @@ import ReplayKit
 import PhotosUI
 import UIKit
 
-// MARK: - 直播模式（实验分支）
+// MARK: - 直播模式
 //
 // 与剪贴板路径的差别只在「输入」：不再长按复制，而是广播扩展持续录屏 + 本地 OCR，
 // 把「对方最新一条 + 前文」自动喂给同一条 JevPipeline。
@@ -12,6 +12,10 @@ import UIKit
 
 struct LiveView: View {
     @EnvironmentObject private var store: ConfigStore
+
+    private func L(_ zh: String, _ en: String) -> String {
+        jevLocalized(store.language, zh: zh, en: en)
+    }
 
     @State private var snapshot: LiveSnapshot?
     @State private var autoAnalyze = true
@@ -35,10 +39,25 @@ struct LiveView: View {
                 suggestSection
                 selfTestSection
             }
-            .navigationTitle("直播")
+            .navigationTitle(L("直播", "Live"))
             .navigationViewStyle(.stack)
             .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
                 tick()
+            }
+            .onChange(of: pickedItem) { item in
+                // 相册自检：选中的截图走与广播扩展同一条识别+解析路径。
+                // loadTransferable 偶发返回 nil（iCloud 未下载等），如实提示，不给假结果。
+                guard let item else { return }
+                Task { @MainActor in
+                    defer { pickedItem = nil }
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let img = UIImage(data: data), let cg = img.cgImage else {
+                        notice = L("这张图读不出来，换一张试试。", "Couldn't read that image; try another one.")
+                        return
+                    }
+                    debugImage = img
+                    debugLines = LiveOCREngine.recognize(cgImage: cg)
+                }
             }
         }
     }
@@ -51,26 +70,34 @@ struct LiveView: View {
                 Image(systemName: JevLiveStore.isActionable ? "dot.radiowaves.left.and.right" : "circle.dashed")
                     .foregroundColor(isLive ? .green : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isLive ? "监听中" : "未在监听").font(.callout.weight(.semibold))
+                    Text(isLive ? L("监听中", "Listening") : L("未在监听", "Not listening"))
+                        .font(.callout.weight(.semibold))
                     if let snap = snapshot, isLive {
                         Text(snap.frameCount == 0
-                             ? "广播已启动 · 等待第一帧识别…"
-                             : "画面变化 \(snap.changedAt.formatted(date: .omitted, time: .standard)) · 已识别 \(snap.frameCount) 帧")
+                             ? L("广播已启动 · 等待第一帧识别…", "Broadcast started · waiting for the first frame…")
+                             : L("画面变化 \(snap.changedAt.formatted(date: .omitted, time: .standard)) · 已识别 \(snap.frameCount) 帧",
+                                 "Last change \(snap.changedAt.formatted(date: .omitted, time: .standard)) · \(snap.frameCount) frames read"))
                             .font(.caption2).foregroundColor(.secondary)
                     } else {
-                        Text("点下面按钮 → 选「秒回直播」→ 开始广播").font(.caption2).foregroundColor(.secondary)
+                        Text(L("点下面按钮 → 选「Jev 直播」→ 开始广播",
+                               "Tap the button below → pick \"Jev Live\" → Start Broadcast"))
+                            .font(.caption2).foregroundColor(.secondary)
                     }
                 }
             }
-            // ⚠️ 必须给紧凑的固定尺寸：整宽摆放时 iOS 26/27 上这个系统控件不渲染内部按钮
-            //（区域全空白、点了没反应——2026-09-24 真机首测「一直未在监听」的直接原因）
+            // 系统广播按钮：点它弹系统面板（列出本 App 的广播扩展），这一步必须真人点。
+            // 两条 2026-09/10 排查定案，写死在这里防止后人再查一遍：
+            //   · 模拟器上面板永远不弹——系统不支持广播扩展，只有真机能走通；
+            //   · iOS 26 起合成事件（XCUITest 坐标点击/无障碍激活/私有 buttonPressed:）
+            //     不触发系统面板，必须真实用户触摸。自动化只能断言到「按钮存在」为止。
             BroadcastPickerView()
                 .frame(width: 64, height: 44)
                 .frame(maxWidth: .infinity)
-            Text("开始后切到任意聊天 App，这里会持续识别屏幕上的对话（每 2 秒一次，纯本地 OCR，只有拿去生成回复的对话文本会发给你自己配的模型）。状态栏会出现系统的紫色录屏指示，停止就在控制中心或回到这里点按钮。")
+            Text(L("开始后切到任意聊天 App，这里会持续识别屏幕上的对话（每 2 秒一次，纯本地 OCR，只有拿去生成回复的对话文本会发给你自己配的模型）。状态栏会出现系统的紫色录屏指示，停止就在控制中心或回到这里点按钮。",
+                   "After starting, switch to any chat app. This page keeps reading the conversation on screen (every 2 s, on-device OCR only; only the text you send for a reply goes to the model you configured). iOS shows the purple recording indicator the whole time — stop from Control Center or tap the button again here."))
                 .font(.caption).foregroundColor(.secondary)
         } header: {
-            Text("屏幕监听")
+            Text(L("屏幕监听", "Screen listening"))
         }
     }
 
@@ -98,11 +125,12 @@ struct LiveView: View {
             if let latest = snap.latestIncoming {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "arrowshape.turn.up.left.fill").font(.caption).foregroundColor(.accentColor)
-                    Text("待回：\(latest)").font(.callout.weight(.medium)).lineLimit(3)
+                    Text(L("待回：\(latest)", "To reply: \(latest)"))
+                        .font(.callout.weight(.medium)).lineLimit(3)
                 }
             }
         } header: {
-            Text("识别结果")
+            Text(L("识别结果", "Recognized"))
         }
     }
 
@@ -118,18 +146,19 @@ struct LiveView: View {
 
     private var suggestSection: some View {
         Section {
-            Toggle("对方有新消息时自动分析", isOn: $autoAnalyze)
+            Toggle(L("对方有新消息时自动分析", "Auto-analyze when they send new messages"), isOn: $autoAnalyze)
             if analyzing {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("生成中…").font(.callout).foregroundColor(.secondary)
+                    Text(L("生成中…", "Generating…")).font(.callout).foregroundColor(.secondary)
                 }
             }
             if let a = analysis {
                 ForEach(a.candidates) { c in
                     Button {
                         UIPasteboard.general.string = c.text
-                        notice = "已复制「\(c.tone)」候选，去输入框粘贴发送"
+                        notice = L("已复制「\(c.tone)」候选，去输入框粘贴发送",
+                                   "Copied the \"\(c.tone)\" suggestion. Paste it in the chat to send")
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(c.text).font(.callout).foregroundColor(.primary)
@@ -147,9 +176,10 @@ struct LiveView: View {
                 Text(notice).font(.caption).foregroundColor(.secondary)
             }
         } header: {
-            Text("建议")
+            Text(L("建议", "Suggestions"))
         } footer: {
-            Text("App 在前台时才会自动分析；锁屏或切走后由键盘接管——切到秒回键盘点「读屏幕分析」即可，同样免复制。")
+            Text(L("App 在前台时才会自动分析；锁屏或切走后由键盘接管——切到 Jev 键盘点「读屏幕分析」即可，同样免复制。",
+                   "Auto-analyze runs only while the app is in the foreground; otherwise the keyboard takes over — switch to the Jev keyboard and tap \"Read screen\"."))
         }
     }
 
@@ -162,10 +192,10 @@ struct LiveView: View {
                 debugImage = img
                 debugLines = LiveOCREngine.recognize(cgImage: img.cgImage!)
             } label: {
-                Label("合成示例截图自检", systemImage: "photo.artframe")
+                Label(L("合成示例截图自检", "Self-test with a synthetic screenshot"), systemImage: "photo.artframe")
             }
             PhotosPicker(selection: $pickedItem, matching: .images) {
-                Label("从相册选聊天截图识别", systemImage: "photo.on.rectangle")
+                Label(L("从相册选聊天截图识别", "Pick a chat screenshot from Photos"), systemImage: "photo.on.rectangle")
             }
             if !debugLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -176,15 +206,15 @@ struct LiveView: View {
                 .padding(.vertical, 2)
             }
         } header: {
-            Text("自检（不开启广播也能验证 OCR）")
+            Text(L("自检（不开启广播也能验证 OCR）", "Self-test (validates OCR without broadcasting)"))
         }
     }
 
     private func tag(_ side: LiveLine.Side) -> String {
         switch side {
-        case .them: return "[对方]"
-        case .me: return "[我]"
-        case .system: return "[系统]"
+        case .them: return L("[对方]", "[them]")
+        case .me: return L("[我]", "[me]")
+        case .system: return L("[系统]", "[system]")
         }
     }
 
@@ -219,21 +249,21 @@ struct LiveView: View {
 // MARK: - 系统广播按钮（UIKit 桥接）
 
 /// RPSystemBroadcastPickerView 是系统控件，点它弹系统面板（列出本 App 的广播扩展），
-/// preferredExtension 让「秒回直播」排第一，用户基本只需再点一下「开始直播」。
+/// preferredExtension 让「Jev 直播」排第一，用户基本只需再点一下「开始直播」。
 ///
-/// ⚠️ 必须用带非零 frame 的构造器（2026-09-24 真机首测「一直未在监听」的根因）：
-/// 默认 init 是零尺寸，内部按钮会被布局成 frame=(inf,inf,0,0)——按钮永久不可见也不可点，
-/// 系统面板永远弹不出来。diag 视图树抓的现行。
-/// 即便如此面板仍可能不弹（模拟器+真机一致，见 docs/LIVE_MODE.md「交接状态」）。
+/// ⚠️ 必须用带非零 frame 的构造器：默认 init 是零尺寸，内部按钮会被布局成
+/// frame=(inf,inf,0,0)——按钮永久不可见也不可点，系统面板永远弹不出来。
+/// ⚠️ preferredExtension 必须与广播扩展 bundle ID 完全一致，且面板只在真机上响应真人点按
+///（模拟器不弹、iOS 26 起合成事件不弹，见 listenSection 里的注释）。
 struct BroadcastPickerView: UIViewRepresentable {
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
         let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
         picker.showsMicrophoneButton = false
-        picker.preferredExtension = "com.jevchat.jarvis.ios.live"
-        // 无障碍 + 真机 UI 自动化（XCUITest 靠这个 identifier 点它）
+        picker.preferredExtension = "com.jevchat.jarvis.live"
+        // 无障碍 + 真机 UI 自动化（XCUITest 靠这个 identifier 找它）
         picker.isAccessibilityElement = true
         picker.accessibilityIdentifier = "broadcastPicker"
-        picker.accessibilityLabel = "开始屏幕广播"
+        picker.accessibilityLabel = "Start Screen Broadcast"
         return picker
     }
 
@@ -246,6 +276,7 @@ enum LiveDebugFixtures {
 
     /// 画一张微信风格的假聊天图：对方靠左灰底、我方靠右主题色、居中时间戳。
     /// 用来在模拟器/不开广播的前提下验证「OCR → 左右归属」整条解析路径。
+    /// 文案固定中文——识别语言就是 zh-Hans，换英文反而测不到重点。
     static func makeFakeChat() -> UIImage {
         let size = CGSize(width: 390, height: 640)
         let renderer = UIGraphicsImageRenderer(size: size)
