@@ -27,7 +27,7 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
         changedAt = Date()
         // 心跳快照：App/键盘 1 秒内就该显示「监听中」，不等 OCR 冷启动出活
         JevLiveStore.save(LiveSnapshot(updatedAt: changedAt, changedAt: changedAt,
-                                       lines: [], frameCount: 0))
+                                       lines: [], frameCount: 0, recent: []))
         JevLiveStore.diag("广播已启动")
     }
 
@@ -52,11 +52,18 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
                 + "\(lines.count) 行，帧 \(CVPixelBufferGetWidth(pixelBuffer))×\(CVPixelBufferGetHeight(pixelBuffer))")
         }
 
-        // 心跳每拍都落盘（payload ~2KB，开销可忽略）；changedAt 只在内容真变了时推进
+        // 心跳每拍都落盘（payload ~2KB，开销可忽略）；changedAt 只在内容真变了时推进。
+        // recent 跨帧累积本帧看到的对方消息簇：键盘弹出时聊天会自动滚到最底、当前帧
+        // 常常只剩用户自己的消息，但扩展在用户滚动浏览历史时每帧都看得到——
+        // 累积起来键盘才能让用户挑「更早的消息」回复（2026-10-22 用户实测需求）。
         let signature = lines.map(\.text).joined(separator: "|")
         if signature != lastSignature { changedAt = now }
         lastSignature = signature
+        let recent = JevLiveStore.mergingRecent(
+            existing: JevLiveStore.load()?.recent ?? [],
+            found: LiveChatParser.incomingClusters(in: lines))
         JevLiveStore.save(LiveSnapshot(updatedAt: now, changedAt: changedAt,
-                                       lines: Array(lines.suffix(40)), frameCount: framesSeen))
+                                       lines: Array(lines.suffix(40)), frameCount: framesSeen,
+                                       recent: recent))
     }
 }

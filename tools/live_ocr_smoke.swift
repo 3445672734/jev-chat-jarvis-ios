@@ -122,6 +122,23 @@ check(selfUI.isEmpty, "自家 App/键盘 UI 词被清洗掉（纯解析）")
 check(LiveChatParser.parse([
     LiveChatParser.Observation(text: "9月26日 23:00", boundingBox: CGRect(x: 0.3, y: 0.5, width: 0.2, height: 0.02)),
 ]).isEmpty, "「9月26日 23:00」带空格的跨天行被清洗（纯解析）")
+
+// 「回复更早」目标累积（2026-10-22 用户需求：键盘一弹聊天滚到底，也要能回历史消息）
+let hist: [LiveLine] = [
+    .init(side: .them, text: "甲"),
+    .init(side: .me, text: "乙"),
+    .init(side: .them, text: "丙一"),
+    .init(side: .them, text: "丙二"),
+    .init(side: .system, text: "10月15日15:23"),
+    .init(side: .them, text: "丁"),
+]
+let clusters = LiveChatParser.incomingClusters(in: hist)
+check(clusters == ["丁", "丙一\n丙二", "甲"],
+      "incomingClusters 自底向上收全簇（多行合并、系统行当边界），实际：\(clusters)")
+let merged = JevLiveStore.mergingRecent(existing: ["丁"], found: clusters, cap: 3)
+check(merged == ["丁", "丙一\n丙二", "甲"], "mergingRecent 新者在前、跨帧去重，实际：\(merged)")
+let snapHist = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: hist, frameCount: 1, recent: merged)
+check(snapHist.latestIncoming == "丁", "滚动到历史片段时主目标退回 recent.first，实际：\(snapHist.latestIncoming ?? "nil")")
 check(lines.first?.side == .them, "第一行归属对方（左）")
 let lastMe = lines.filter { $0.side == .me }.last
 check(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")

@@ -33,6 +33,10 @@ struct LiveSnapshot: Codable, Equatable {
     var lines: [LiveLine]
     /// 扩展自启动以来见过的帧数（诊断用，够判断「广播活着但没有新帧」）
     var frameCount: Int
+    /// 最近识别过的**全部对方消息**（新→旧，去重，跨帧累积）。v3 加入。
+    /// 键盘弹出时聊天 App 会自动滚到最底，当前帧里往往只剩最新的几条——用户想回
+    /// 更早的消息就得靠这份累积（2026-10-22 用户实测需求「我想同时能回复历史的消息」）。
+    var recent: [String] = []
 
     /// 当前该回的消息：跳过尾部的系统行（时间/撤回提示），从尾往前取连续的对方气泡。
     /// 多行气泡合并成一条；没有对方消息（比如最后一屏全是自己发的）返回 nil。
@@ -162,6 +166,25 @@ enum LiveChatParser {
         }
         return cjk(left) && cjk(right)
     }
+
+    /// 一帧里的全部对方消息簇（新→旧）。与 latestIncoming 同规则（多行合并、系统行当边界），
+    /// 但不只在帧尾找——用户滚动浏览聊天历史时，扩展每帧都能看到不同片段，
+    /// 逐帧把这里的结果去重累积进快照 recent，键盘才能让用户挑「更早的消息」来回复。
+    static func incomingClusters(in lines: [LiveLine]) -> [String] {
+        var clusters: [String] = []
+        var i = lines.count - 1
+        while i >= 0 {
+            guard lines[i].side == .them else { i -= 1; continue }
+            var buf: [String] = []
+            while i >= 0, lines[i].side == .them {
+                buf.insert(lines[i].text, at: 0)
+                i -= 1
+            }
+            let joined = buf.joined(separator: "\n")
+            if !joined.isEmpty { clusters.append(joined) }
+        }
+        return Array(clusters.prefix(4))
+    }
 }
 
 // MARK: - App Group 存储
@@ -169,8 +192,9 @@ enum LiveChatParser {
 /// 快照的唯一存放点。不放新文件进容器目录——UserDefaults 跨进程同步由 cfprefsd 负责，
 /// 键盘 2 秒轮询一次小 key 的开销可以忽略。
 enum JevLiveStore {
-    /// v2：加了 changedAt 字段。v1 从来没有成功写出来过（见 LiveSnapshot 注释），无需迁移。
-    static let snapshotKey = "jev.live.snapshot.v2"
+    /// v3：加了 recent（跨帧累积的对方消息历史，支撑「回复更早的消息」）。
+    /// v2 加过 changedAt；v1 从来没有成功写出来过（见 LiveSnapshot 注释），无需迁移。
+    static let snapshotKey = "jev.live.snapshot.v3"
     /// 与 JevStore.appGroupID 同值。JevLive.swift 单文件编译进广播扩展（不带 JevModel），
     /// 所以这里自带一份——改 App Group 时 entitlements / project.yml / 这两处要一起改。
     private static let appGroupID = "group.com.jevchat.jarvis"
@@ -191,6 +215,18 @@ enum JevLiveStore {
         guard let data = defaults.data(forKey: snapshotKey),
               let snap = try? JSONDecoder().decode(LiveSnapshot.self, from: data) else { return nil }
         return snap
+    }
+
+    /// 把本帧识别到的对方消息簇并进累积历史：新的在前、跨帧去重、封顶。
+    /// found 与 existing 都是新→旧序。封顶 6 条——键盘上最多展示 3 条（主目标+2 个更早），
+    /// 留一倍冗余；再多用户也挑不过来，还平白增大快照体积。
+    static func mergingRecent(existing: [String], found: [String], cap: Int = 6) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for msg in found + existing where seen.insert(msg).inserted {
+            out.append(msg)
+        }
+        return Array(out.prefix(cap))
     }
 
     static func isFresh(_ snapshot: LiveSnapshot) -> Bool {

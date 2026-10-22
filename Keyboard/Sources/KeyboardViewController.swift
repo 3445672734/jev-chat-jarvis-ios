@@ -33,10 +33,17 @@ final class KeyboardViewController: UIInputViewController {
     /// 快照新鲜且有待回消息时，待机页顶部多一个「读屏幕分析」主按钮，
     /// 用户就不再需要长按复制每条消息。
     private var liveTimer: Timer?
-    private var lastLiveActive = false
-    private var lastListening = false
+    /// 上次轮询时的直播状态签名，变了才重画待机页（内容级，不是时间级）
+    private var lastLiveSignature = ""
 
-    private static func liveActive() -> Bool { JevLiveStore.isActionable }
+    /// 直播目标的签名：监听态 + 主目标文本 + 累积历史条数。
+    /// 用内容而不是「是否 actionable」做签名——主目标文本一变（对方发新消息/用户滚到新片段）
+    /// 按钮就要跟上，但聊天滚动造成的空帧不能把按钮打没了又弹回来（2026-10-22 用户实测的「跳一下」）。
+    private static func liveSignature() -> String {
+        let snap = JevLiveStore.load()
+        let primary = snap?.latestIncoming ?? snap?.recent.first
+        return "\(JevLiveStore.isListening)|\(primary ?? "-")|\(snap?.recent.count ?? 0)"
+    }
 
     // MARK: 布局骨架
 
@@ -95,10 +102,9 @@ final class KeyboardViewController: UIInputViewController {
         JevStore.saveKeyboardStatus(KeyboardStatus(lastSeen: Date(), hasFullAccess: hasFullAccess))
         prewarm()
         // 直播快照轮询：快照由广播扩展在别的进程里写，键盘只在待机页关心它活没活。
-        // 「监听中」或「有待回消息」翻转时重画——监听刚建立/刚断开都要立刻给反馈，
-        // 否则用户看不出键盘有任何直播相关的变化（2026-10-22 真机首试的教训）。
-        lastLiveActive = Self.liveActive()
-        lastListening = JevLiveStore.isListening
+        // 状态签名（监听态/主目标/历史条数）变化时重画——新消息到了按钮要跟上，
+        // 但每 2 秒的常规心跳不能触发重画打断点按。
+        lastLiveSignature = Self.liveSignature()
         if liveTimer == nil {
             liveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
                 self?.liveTick()
@@ -118,11 +124,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func liveTick() {
         guard mode == .idle else { return }
-        let active = Self.liveActive()
-        let listening = JevLiveStore.isListening
-        if active != lastLiveActive || listening != lastListening {
-            lastLiveActive = active
-            lastListening = listening
+        let sig = Self.liveSignature()
+        if sig != lastLiveSignature {
+            lastLiveSignature = sig
             render()
         }
     }
@@ -391,32 +395,49 @@ final class KeyboardViewController: UIInputViewController {
         let cfg = JevStore.loadConfig()
 
         var rows: [UIView] = []
-        let liveOn = Self.liveActive()
-        if liveOn, let snap = JevLiveStore.load(), let latest = snap.latestIncoming {
-            // 多行消息在快照里以 \n 合并，按钮标题是单行的，换成空格再截断
-            let flattened = latest.replacingOccurrences(of: "\n", with: " ")
-            let preview = String(flattened.prefix(16)) + (flattened.count > 16 ? "…" : "")
-            let liveBtn = KB.button(L("读屏幕分析：「\(preview)」", "Read screen: \"\(preview)\""),
-                                    icon: "dot.radiowaves.left.and.right", primary: true,
+        let snap = JevLiveStore.load()
+        let listening = JevLiveStore.isListening
+        // 主目标 = 当前帧尾部的对方消息；当前帧没有时退回累积历史里最近的一条。
+        // 键盘一弹聊天就滚到底、画面里可能只剩用户自己的消息——目标不能因此消失
+        // 乱跳（2026-10-22 用户实测），也不能因此只能回最新一条（用户要能挑历史消息）。
+        let primary = snap?.latestIncoming ?? snap?.recent.first
+        if listening, let primary {
+            // 目标列表：主目标（当前帧尾部；空帧时退回累积历史最近一条）+ 至多两条更早的。
+            // 拆开写不死类型检查器：数组拼接 + dropFirst + filter + prefix 一口气写会炸。
+            var targets: [String] = [primary]
+            for older in (snap?.recent ?? []).dropFirst() where older != primary && targets.count < 3 {
+                targets.append(older)
+            }
+            for (index, message) in targets.enumerated() {
+                let flattened = message.replacingOccurrences(of: "\n", with: " ")
+                let preview = String(flattened.prefix(16)) + (flattened.count > 16 ? "…" : "")
+                let label = index == 0
+                    ? L("读屏幕分析：「\(preview)」", "Read screen: \"\(preview)\"")
+                    : L("回复更早：「\(preview)」", "Earlier: \"\(preview)\"")
+                let btn = KB.button(label,
+                                    icon: index == 0 ? "dot.radiowaves.left.and.right" : "clock.arrow.circlepath",
+                                    primary: index == 0,
                                     font: .systemFont(ofSize: 14, weight: .semibold))
-            liveBtn.heightAnchor.constraint(equalToConstant: 44).isActive = true
-            liveBtn.addTarget(self, action: #selector(analyzeLive), for: .touchUpInside)
-            rows.append(liveBtn)
+                btn.heightAnchor.constraint(equalToConstant: index == 0 ? 44 : 38).isActive = true
+                // 目标文本放 identifier 里传给 action（同话术格子的做法）
+                btn.accessibilityIdentifier = message
+                btn.addTarget(self, action: #selector(analyzeTarget(_:)), for: .touchUpInside)
+                rows.append(btn)
+            }
         }
 
-        // 三态提示：有待回消息（主按钮在上方）/ 只在监听还没读到对方消息 / 未开播。
+        // 三态提示：有可选目标（按钮在上方）/ 只在监听还没读到任何对方消息 / 未开播。
         // 「只在监听」这一态必须有明确反馈，否则开播后的键盘和平时长得一模一样，
         // 用户会以为功能没生效（2026-10-22 真机首试：用户看着普通待机页直接退出去找客服了）。
-        let listening = JevLiveStore.isListening
         let guide = KB.label(
-            liveOn ? L("直播监听中 · 免复制，点上面的按钮直接分析", "Live listening · no copy needed, tap the button above")
-                   : listening ? L("直播监听中 · 还没读到对方的新消息，回到聊天界面停一两秒再回来",
-                                   "Live listening · no new message from them yet. Stay in the chat a couple of seconds, then come back")
-                   : L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
+            primary != nil ? L("直播监听中 · 免复制，点上面的按钮直接分析", "Live listening · no copy needed, tap a button above")
+                           : listening ? L("直播监听中 · 还没读到对方的新消息，回到聊天界面停一两秒再回来",
+                                           "Live listening · no new message from them yet. Stay in the chat a couple of seconds, then come back")
+                           : L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
             font: .systemFont(ofSize: 12), color: KB.secondaryText)
 
         let clipBtn = KB.button(L("分析剪贴板", "Analyze Clipboard"), icon: "doc.on.clipboard",
-                                primary: !liveOn,
+                                primary: primary == nil,
                                 font: .systemFont(ofSize: 14, weight: .semibold))
         clipBtn.addTarget(self, action: #selector(analyzeClipboard), for: .touchUpInside)
 
@@ -424,7 +445,7 @@ final class KeyboardViewController: UIInputViewController {
                                  font: .systemFont(ofSize: 14, weight: .semibold))
         inputBtn.addTarget(self, action: #selector(analyzeInputField), for: .touchUpInside)
 
-        // 两个分析入口并排：左边读剪贴板，右边读当前输入框；直播活跃时主色让位给读屏幕
+        // 两个分析入口并排：左边读剪贴板，右边读当前输入框；直播有目标时主色让位给读屏幕
         let btnRow = UIStackView(arrangedSubviews: [clipBtn, inputBtn])
         btnRow.axis = .horizontal
         btnRow.spacing = 8
@@ -771,18 +792,14 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     /// 直播模式入口：不读剪贴板，读广播扩展 OCR 出来的对话快照。
-    /// message = 对方最新一条（多行合并），context = 之前的对话——和剪贴板路径走同一条管线。
-    @objc private func analyzeLive() {
+    /// 目标文本（当前帧尾部对方消息，或用户挑的「更早的消息」）放在按钮的
+    /// accessibilityIdentifier 里传入（同话术格子的做法）；context = 之前的对话——
+    /// 和剪贴板路径走同一条管线。
+    @objc private func analyzeTarget(_ sender: UIButton) {
         lastSource = .live
         guard hasFullAccess else { setMode(.gate); return }
-        guard let snap = JevLiveStore.load(), JevLiveStore.isFresh(snap),
-              let latest = snap.latestIncoming else {
-            errorText = L("还没有可用的直播快照：先到 Jev Jarvis App 的「直播」页点按钮开始广播，回到聊天界面停留几秒再回来。",
-                          "No live snapshot yet. Start broadcasting from the Live tab in Jev Jarvis, stay in the chat for a few seconds, then come back.")
-            setMode(.error)
-            return
-        }
-        run(message: latest, context: snap.contextText)
+        guard let message = sender.accessibilityIdentifier, !message.isEmpty else { return }
+        run(message: message, context: JevLiveStore.load()?.contextText)
     }
 
     @objc private func regenerate() { run(message: lastMessage, context: lastContext) }
