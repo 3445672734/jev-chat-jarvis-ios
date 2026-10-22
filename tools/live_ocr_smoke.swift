@@ -54,8 +54,11 @@ bubble("在吗，周末的那个方案你看了一眼没", them: true, y: 1080, 
 bubble("看了看了，这两天有点忙", them: false, y: 980, in: ctx)
 bubble("周五之前给你一版完整的", them: false, y: 880, in: ctx)
 bubble("行，记得把报价也放进去，老板要看价格", them: true, y: 780, in: ctx)
-bubble("好嘞", them: false, y: 680, in: ctx)
-bubble("对了上次说的那家餐厅周末去吗", them: true, y: 580, in: ctx)
+bubble("好嘞", them: false, y: 700, in: ctx)
+// 跨天分隔行（2026-10-22 真机快照实锤的漏网形态）：不清洗就会被并进「对方消息」
+drawText("10月15日15:23", size: 24, color: CGColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1),
+         at: CGPoint(x: 300, y: 640), in: ctx)
+bubble("对了上次说的那家餐厅周末去吗", them: true, y: 560, in: ctx)
 drawText("发送", size: 28, color: CGColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 1),
          at: CGPoint(x: 350, y: 60), in: ctx)
 
@@ -108,6 +111,17 @@ func check(_ cond: Bool, _ name: String) {
 
 check(!lines.isEmpty, "识别出非空对话行")
 check(!lines.contains { $0.side == .system }, "时间戳/底部 UI 被清洗掉")
+check(!lines.contains { $0.text.contains("10月15日") }, "跨天日期行被清洗掉")
+// 自家 App/键盘的界面词（广播开着自己 App 时会被 OCR 到，2026-10-22 真机实锤）
+let selfUI = LiveChatParser.parse([
+    LiveChatParser.Observation(text: "AI 分析输入框文字", boundingBox: CGRect(x: 0.55, y: 0.2, width: 0.3, height: 0.03)),
+    LiveChatParser.Observation(text: "秒回", boundingBox: CGRect(x: 0.1, y: 0.3, width: 0.1, height: 0.03)),
+    LiveChatParser.Observation(text: "读屏幕分析", boundingBox: CGRect(x: 0.2, y: 0.4, width: 0.2, height: 0.03)),
+])
+check(selfUI.isEmpty, "自家 App/键盘 UI 词被清洗掉（纯解析）")
+check(LiveChatParser.parse([
+    LiveChatParser.Observation(text: "9月26日 23:00", boundingBox: CGRect(x: 0.3, y: 0.5, width: 0.2, height: 0.02)),
+]).isEmpty, "「9月26日 23:00」带空格的跨天行被清洗（纯解析）")
 check(lines.first?.side == .them, "第一行归属对方（左）")
 let lastMe = lines.filter { $0.side == .me }.last
 check(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")
@@ -118,9 +132,11 @@ if !lines.isEmpty {
     let snap = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: lines, frameCount: 1)
     check(snap.latestIncoming?.contains("餐厅") == true,
           "latestIncoming = 末条对方消息（含「餐厅」），实际：\(snap.latestIncoming ?? "nil")")
+    check(snap.latestIncoming?.contains("10月15日") != true, "latestIncoming 不含日期行")
     let ctxText = snap.contextText ?? ""
     check(ctxText.contains("我："), "contextText 带说话人前缀")
     check(ctxText.contains("报价"), "contextText 含此前对话（报价那条）")
+    check(ctxText.contains("好嘞"), "contextText 含日期行之前的我方消息")
     check(!ctxText.contains("餐厅"), "contextText 不含待回消息本体")
 }
 
