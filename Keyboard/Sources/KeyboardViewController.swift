@@ -34,6 +34,7 @@ final class KeyboardViewController: UIInputViewController {
     /// 用户就不再需要长按复制每条消息。
     private var liveTimer: Timer?
     private var lastLiveActive = false
+    private var lastListening = false
 
     private static func liveActive() -> Bool { JevLiveStore.isActionable }
 
@@ -94,8 +95,10 @@ final class KeyboardViewController: UIInputViewController {
         JevStore.saveKeyboardStatus(KeyboardStatus(lastSeen: Date(), hasFullAccess: hasFullAccess))
         prewarm()
         // 直播快照轮询：快照由广播扩展在别的进程里写，键盘只在待机页关心它活没活。
-        // 只在「没监听 ↔ 有监听」翻转时重画，避免每 2 秒重建视图打断点按。
+        // 「监听中」或「有待回消息」翻转时重画——监听刚建立/刚断开都要立刻给反馈，
+        // 否则用户看不出键盘有任何直播相关的变化（2026-10-22 真机首试的教训）。
         lastLiveActive = Self.liveActive()
+        lastListening = JevLiveStore.isListening
         if liveTimer == nil {
             liveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
                 self?.liveTick()
@@ -116,8 +119,10 @@ final class KeyboardViewController: UIInputViewController {
     private func liveTick() {
         guard mode == .idle else { return }
         let active = Self.liveActive()
-        if active != lastLiveActive {
+        let listening = JevLiveStore.isListening
+        if active != lastLiveActive || listening != lastListening {
             lastLiveActive = active
+            lastListening = listening
             render()
         }
     }
@@ -399,8 +404,14 @@ final class KeyboardViewController: UIInputViewController {
             rows.append(liveBtn)
         }
 
+        // 三态提示：有待回消息（主按钮在上方）/ 只在监听还没读到对方消息 / 未开播。
+        // 「只在监听」这一态必须有明确反馈，否则开播后的键盘和平时长得一模一样，
+        // 用户会以为功能没生效（2026-10-22 真机首试：用户看着普通待机页直接退出去找客服了）。
+        let listening = JevLiveStore.isListening
         let guide = KB.label(
             liveOn ? L("直播监听中 · 免复制，点上面的按钮直接分析", "Live listening · no copy needed, tap the button above")
+                   : listening ? L("直播监听中 · 还没读到对方的新消息，回到聊天界面停一两秒再回来",
+                                   "Live listening · no new message from them yet. Stay in the chat a couple of seconds, then come back")
                    : L("长按对方消息 → 复制，再点下面的按钮", "Long-press the message → Copy, then tap a button below"),
             font: .systemFont(ofSize: 12), color: KB.secondaryText)
 

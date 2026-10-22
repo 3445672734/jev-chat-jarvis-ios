@@ -204,6 +204,15 @@ enum JevLiveStore {
         return true
     }
 
+    /// 「广播活着」= 快照新鲜（扩展每 2 秒心跳落盘）。比 isActionable 宽：
+    /// 广播刚开、还没读到对方气泡时也是 true。键盘待机页用它显示「监听中」提示——
+    /// 2026-10-22 真机首试的教训：按钮要等识别到对方消息才出现，而用户在那之前的
+    /// 两分钟里完全看不出键盘有任何直播相关的反应，以为功能没生效。
+    static var isListening: Bool {
+        guard let snap = load() else { return false }
+        return isFresh(snap)
+    }
+
     /// 扩展侧自检日志。广播扩展连 Xcode 控制台都看不着，出问题全靠这一条通道
     /// （与 JevStore.diag 共用同一个 key：App/键盘/扩展三个进程谁写的都能读到）。
     /// 不做 DEBUG 门控：LiveBroadcastHandler 无条件调用它，而 Release/Archive 配置下
