@@ -12,6 +12,9 @@ final class LiveBroadcastUITests: XCTestCase {
 
     func testLiveBroadcastEndToEnd() throws {
         let app = XCUIApplication()
+        // 用例断言的是中文文案（「直播」「监听中」），设备语言不是中文时会找不到元素——
+        // 启动参数强制 App 跑在中文环境，断言才有确定性。
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
 
         let tab = app.tabBars.buttons["直播"]

@@ -1,9 +1,10 @@
-# 直播模式（实验分支 explore/live-ocr）
+# 直播模式
 
-> 状态：**交接中（2026-09-24）**——OCR→解析链路已验证、双出口 UI 已就位、
-> 「一直未在监听」的两个根因已修；**唯一拦路虎：系统广播面板始终不弹**（见「交接状态」）。
+> 状态：**已并入主干功能集（0.2.0，2026-10-22）**——OCR→解析链路冒烟 10/10、双出口 UI 就位、
+> 标识体系归位 master（`com.jevchat.jarvis.live` / `group.com.jevchat.jarvis`）、
+> 广播面板「不弹」定性为**模拟器不支持 + iOS 26 只认真人点按**（非代码 bug，见「交接状态」）。
 > 结论先行：**方向可行，但有三条硬约束**（见下）。输入从「手动复制」变成「自动读屏」，
-> 生成层/话术/判断层完全复用旧管线，没有新依赖。
+> 生成层/话术/判断层完全复用旧管线，没有新依赖。4.3 驳回后的功能差异化主力，见 [`REVIEW_4_3.md`](REVIEW_4_3.md)。
 
 ## 一、思路与数据流
 
@@ -39,12 +40,17 @@
 iOS 模型随系统分发，冷启动代价小得多，但广播开始后的头一两帧慢属正常——
 所以扩展在 `broadcastStarted` 就写心跳快照，App/键盘立刻显示「监听中」，不等首帧识别。
 
-## 二点五、交接状态（2026-09-24，交给下一位）
+## 二点五、交接状态（2026-10-22 更新）
 
 ### 已经好的
 - 编译、装机、App「直播」页 + 键盘「读屏幕分析」双出口 UI。
+- **explore/live-ocr 已并回 master 标识体系**（2026-10-22 合并）：扩展 bundle ID
+  `com.jevchat.jarvis.ios.live` → **`com.jevchat.jarvis.live`**，App Group 统一
+  `group.com.jevchat.jarvis`（entitlements / project.yml / `JevLiveStore` / `preferredExtension` 四处已同步），
+  团队 75LZ93U5CF，版本 0.2.0 (3)。无签名设备构建 + 扩展嵌入（PlugIns/JevLive.appex）已验证。
+- 界面全量中英双语（master 本地化体系 `jevLocalized`）；相册自检补上了选中处理逻辑（此前选了没反应）。
 - OCR 链路：`tools/live_ocr_smoke.swift` 冒烟 10/10（合成微信风图 6 气泡全对、左右归属全对、
-  时间戳/「发送」清洗、latestIncoming/contextText 语义正确）。App「直播」页底部自检
+  时间戳/「发送」清洗、latestIncoming/contextText 语义正确；2026-10-22 复跑通过）。App「直播」页底部自检
   （合成图 / 相册真截图）走同一条识别代码。
 - 「一直未在监听」的两个根因已修（修法都有注释锚点）：
   1. **扩展心跳缺失**：旧版只在「识别出非空且变化的文字」时落盘，广播刚启动/OCR 冷启动的
@@ -55,32 +61,25 @@ iOS 模型随系统分发，冷启动代价小得多，但广播开始后的头�
      `frame=(inf,inf,0,0)`（diag 视图树抓的现行）→ 按钮不可见不可点。改用非零 frame 构造器
      （`BroadcastPickerView.makeUIView`）后按钮正常渲染。
 
-### 卡住的（唯一拦路虎）
-**系统广播面板（「开始直播」sheet）从不出现**——模拟器与真机一致。已做过并排除的：
-- XCUITest 合成坐标点击 + 无障碍激活两种点法，触摸探针确认事件到达 picker；
-- 程序化调私有 `buttonPressed:`（selector dump 里找到的内部 action）——不崩也不弹；
-- 关 debug dylib（`ENABLE_DEBUG_DYLIB=NO` 重测）——无效，排除新构建结构；
-- 签名/团队（模拟器无签名也不弹）、扩展未嵌入（PlugIns/JevLive.appex 存在，
-  Info.plist 的 NSExtensionPointIdentifier / NSExtensionPrincipalClass 均正确）、
-  jetsam/崩溃（无 JevLive 崩溃日志；9/24 的 JetsamEvent 与我们无关）。
+### 「面板不弹」定性（原唯一拦路虎，非代码 bug）
+2026-10-22 调研定性（Apple 文档 + 社区案例，注释锚点在 `LiveView.listenSection` 与 `BroadcastPickerView`）：
+1. **模拟器上系统广播面板永远不弹**——广播上传扩展不被模拟器支持，这条排查线从一开始就死路；
+2. **真机上必须真人点按**：iOS 26 起对合成事件明显收紧，XCUITest 坐标点击、无障碍激活、
+   私有 `buttonPressed:` 都不触发系统面板（前两轮排查的合成点按全落在这一类）；
+3. 代码侧唯一能做的就是配置正确（`preferredExtension` 与扩展 bundle ID 完全一致、扩展真实嵌入、
+   三 target 同团队签名）+ 按钮可见可点——这四项现在都满足并写进了构建自检。
 
-### 下一批排查方向（按性价比排序）
-1. **真人点一次**：真机最新构建里按钮已可见（红圈图标），手点看弹不弹——30 秒定案
-   「真机真触摸是否可行」。若弹，说明只有合成点击/测试器环境被抑制，自动化改断点即可。
-2. **脱离 XCUITest 验证**：`xcrun simctl install/launch` 正常启动模拟器 App（无测试器），
-   DEBUG 里定时自动触发一次 `buttonPressed:`，`simctl io screenshot` 看面板出不出来。
-3. **对照 iOS 26/27 的 ReplayKit 变更**：查 WWDC 25/26 有没有 broadcast-services-upload 的
-   新 Info.plist 键 / entitlement / 弃员说明；拿一个已知在 iOS 26 能跑通的开源广播扩展
-   工程在模拟器点通，再 diff 配置。
-4. 面板一通，跑 `UITests/LiveBroadcastUITests.swift`（断言已写好：
-   监听中 → 已识别帧 → 60 秒不掉线 → 停播），全链路即绿。
+**下一步只剩一步：真机装 0.2.0 (3)，解锁状态用手指点「直播」页的广播按钮**——
+预期弹系统面板 → 选「Jev 直播」→ 开始广播。通了之后跑 `UITests/LiveBroadcastUITests.swift`
+（断言已写好：监听中 → 已识别帧 → 60 秒不掉线 → 停播；注意它只负责点按钮和断言状态，
+面板内的「开始直播」仍需真人代点一次）。真机自动化命令：
 
-### 真机自动化怎么用（已搭好）
 ```bash
 xcodegen generate   # 若改过 project.yml
 xcodebuild test -project JevJarvis.xcodeproj -scheme JevJarvis \
   -destination 'platform=iOS,id=<UDID>' -allowProvisioningUpdates
 ```
+
 手机需解锁、别拔线、测试运行期间别手动点屏幕。扩展侧诊断走 App Group 的
 `jev.diag.v1`（`JevLiveStore.diag`，[直播] 前缀），用
 `devicectl device copy from --domain-type appGroupDataContainer` 拉出来看。
@@ -96,10 +95,10 @@ xcodebuild test -project JevJarvis.xcodeproj -scheme JevJarvis \
 ## 四、真机测试步骤（模拟器测不了广播链路）
 
 1. `xcodegen generate` → Xcode 选 `JevJarvis` scheme → 真机 Run。
-2. App →「直播」页 → 点广播按钮 → 系统面板选「秒回直播」→ 开始广播。
+2. App →「直播」页 → 点广播按钮 → 系统面板选「Jev 直播」→ 开始广播。
 3. 切到微信，停留在某会话几秒（让扩展吃几帧）。
 4. 回 App「直播」页：看「识别结果」一节是否还原了对话、左右有没有判反。
-5. 键盘路径：微信里把键盘切到秒回 → 待机页应出现橙色「读屏幕分析：…」按钮 →
+5. 键盘路径：微信里把键盘切到 Jev → 待机页应出现主色「读屏幕分析：…」按钮 →
    点它，应直接出候选（等价于原来「分析剪贴板」的效果）。
 6. 想关：控制中心停止广播，或回 App 点停止。快照 150 秒后自动视为失效。
 7. 不开广播也能验证 OCR：App「直播」页底部「自检」——合成示例图 / 从相册选真截图，
