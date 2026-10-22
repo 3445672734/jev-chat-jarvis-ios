@@ -153,6 +153,18 @@ check(!LiveChatParser.looksLikeConversation([.init(side: .them, text: "甲"), .i
 check(!LiveChatParser.looksLikeConversation([.init(side: .me, text: "甲"), .init(side: .me, text: "乙")]),
       "只有单侧气泡（纯我方）不是会话")
 check(!LiveChatParser.looksLikeConversation([]), "空画面不是会话")
+// 会话延续：滚动单侧气泡的历史区间时，相邻帧有共同内容仍算会话（否则翻历史会被门控漏掉）
+check(LiveChatParser.extendsConversation(
+    [.init(side: .them, text: "丙"), .init(side: .them, text: "丁")],
+    previous: [.init(side: .me, text: "乙"), .init(side: .them, text: "丙")]),
+    "与上一帧有共同行 = 会话延续（单侧滚动区间）")
+check(!LiveChatParser.extendsConversation(
+    [.init(side: .them, text: "设置")],
+    previous: [.init(side: .me, text: "乙"), .init(side: .them, text: "丙")]),
+    "与上一帧无共同行 = 不是会话（切到别的 App）")
+check(!LiveChatParser.extendsConversation(
+    [.init(side: .them, text: "新内容")], previous: []),
+    "上一帧为空（刚开播/刚切回）时无延续可言")
 check(lines.first?.side == .them, "第一行归属对方（左）")
 let lastMe = lines.filter { $0.side == .me }.last
 check(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")

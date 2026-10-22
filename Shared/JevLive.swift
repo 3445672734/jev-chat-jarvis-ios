@@ -199,6 +199,18 @@ enum LiveChatParser {
         }
         return them >= 1 && me >= 1
     }
+
+    /// 会话延续判定：本帧与上一帧有共同文本行。用户在聊天里滚动浏览时（包括翻到
+    /// 只剩单侧气泡的老历史，2026-10-22 用户反馈「滑到最上面一点输入框就弹回最底」），
+    /// 相邻两帧的画面必有交集；切到别的 App 则内容完全不同、交集为空。
+    /// 与 looksLikeConversation 二选一满足即视为会话——否则门控会把单侧气泡的
+    /// 历史区间整段漏掉，「回复更早」就累积不到用户翻过的消息。
+    static func extendsConversation(_ current: [LiveLine], previous: [LiveLine]) -> Bool {
+        guard !previous.isEmpty else { return false }
+        let cur = Set(current.map(\.text))
+        let prev = Set(previous.map(\.text))
+        return !cur.isDisjoint(with: prev)
+    }
 }
 
 // MARK: - App Group 存储

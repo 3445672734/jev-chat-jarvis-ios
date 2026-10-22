@@ -19,6 +19,9 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
     private var lastOCRAt = Date.distantPast
     /// nil = 还没识别过第一帧（与「识别出了空白画面」区分）
     private var lastSignature: String?
+    /// 上一会话帧的识别内容：会话延续判定用（滚动单侧气泡区间时相邻帧有交集）。
+    /// 只在会话帧更新——切出聊天后它冻结，别的 App 内容对不上交集，门控照常生效。
+    private var lastLines: [LiveLine] = []
     private var changedAt = Date()
     private var framesSeen = 0
     private var ocrRuns = 0
@@ -53,20 +56,22 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
         }
 
         // 心跳每拍都落盘（payload ~2KB，开销可忽略）；changedAt 只在内容真变了时推进。
-        // 会话门控：只有「长得像双人聊天」的画面才产生识别内容（lines 落快照、recent 累积）；
-        // 其他画面（设置/相册/网页…）只发心跳、清空识别结果、recent 冻结保留——
-        // 广播期间用户切去别的 App，不该在快照里留下那个 App 的内容（2026-10-22 用户隐私诉求）。
-        // recent 冻结而非清空：从别的 App 切回聊天，历史目标不丢，键盘按钮不闪没。
-        let conversation = LiveChatParser.looksLikeConversation(lines)
-        let signature = conversation ? lines.map(\.text).joined(separator: "|") : ""
+        // 会话门控：识别内容只在会话帧产生。「会话」= 双侧气泡同框（looksLikeConversation）
+        // 或与上一会话帧有共同内容（extendsConversation——滚动单侧气泡的老历史时仍算会话，
+        // 否则门控会把用户翻过的消息整段漏掉）；切到别的 App 内容对不上交集，只发心跳、
+        // 清空识别结果、recent 冻结保留（切回聊天不丢历史目标）。
+        let inConversation = LiveChatParser.looksLikeConversation(lines)
+            || LiveChatParser.extendsConversation(lines, previous: lastLines)
+        if inConversation { lastLines = lines }
+        let signature = inConversation ? lines.map(\.text).joined(separator: "|") : ""
         if signature != lastSignature { changedAt = now }
         lastSignature = signature
-        let recent = conversation
+        let recent = inConversation
             ? JevLiveStore.mergingRecent(existing: JevLiveStore.load()?.recent ?? [],
                                          found: LiveChatParser.incomingClusters(in: lines))
             : (JevLiveStore.load()?.recent ?? [])
         JevLiveStore.save(LiveSnapshot(updatedAt: now, changedAt: changedAt,
-                                       lines: conversation ? Array(lines.suffix(40)) : [],
+                                       lines: inConversation ? Array(lines.suffix(40)) : [],
                                        frameCount: framesSeen, recent: recent))
     }
 }
