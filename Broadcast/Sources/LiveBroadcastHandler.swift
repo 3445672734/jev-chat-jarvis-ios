@@ -44,10 +44,25 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
         let now = Date()
         guard now.timeIntervalSince(lastOCRAt) >= Self.interval else { return }
         lastOCRAt = now
+
+        // App「直播」页在前台时整帧跳过（只发心跳、冻结 recent）：页面上是我们自己的
+        // 识别结果 UI，OCR 它只会把上一轮目标喂回快照形成自反馈（2026-10-22 日志实锤）。
+        if JevLiveStore.appLiveVisible() {
+            lastSignature = ""
+            lastLines = []
+            JevLiveStore.save(LiveSnapshot(updatedAt: now, changedAt: changedAt, lines: [],
+                                           frameCount: framesSeen,
+                                           recent: JevLiveStore.load()?.recent ?? []))
+            return
+        }
+
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let started = Date()
-        let lines = LiveOCREngine.recognize(pixelBuffer: pixelBuffer)
+        // 键盘面板开着时抬底部裁剪：面板在识别区里会被 OCR，按钮上显示的上一轮目标
+        // 会被喂回快照（同一个自反馈回路）。比例由键盘自报（含时间戳，过期按 0 处理）。
+        let bottomCut = min(0.6, max(0.14, JevLiveStore.keyboardPanelFraction() + 0.02))
+        let lines = LiveOCREngine.recognize(pixelBuffer: pixelBuffer, bottomCut: bottomCut)
         ocrRuns += 1
         if ocrRuns == 1 {
             // 首帧识别是模型冷启动最慢的一次，时长落 diag 备查

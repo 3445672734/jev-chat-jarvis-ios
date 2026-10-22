@@ -84,7 +84,11 @@
 口径回归（Mac 上直接跑，不需要 iPhone）：
 
 ```bash
+# 管线口径：意图/风险/话术/prompt/清洗
 swiftc -o /tmp/jevcheck tools/PromptCheck/main.swift Shared/*.swift && /tmp/jevcheck
+
+# 直播 OCR 链路：识别/左右归属/清洗/会话门控/模糊去重/目标累积
+tools/run_live_smoke.sh
 ```
 
 ## 工程结构

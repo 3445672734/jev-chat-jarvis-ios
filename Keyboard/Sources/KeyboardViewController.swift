@@ -35,6 +35,8 @@ final class KeyboardViewController: UIInputViewController {
     private var liveTimer: Timer?
     /// 上次轮询时的直播状态签名，变了才重画待机页（内容级，不是时间级）
     private var lastLiveSignature = ""
+    /// 面板高度占整屏比例（广播扩展据此抬底部裁剪，防键盘自身被 OCR 进快照）
+    private var panelFraction: Double = 0
 
     /// 直播目标的签名：监听态 + 主目标文本 + 累积历史条数。
     /// 用内容而不是「是否 actionable」做签名——主目标文本一变（对方发新消息/用户滚到新片段）
@@ -107,6 +109,8 @@ final class KeyboardViewController: UIInputViewController {
         lastLiveSignature = Self.liveSignature()
         if liveTimer == nil {
             liveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                // 顺手刷新面板高度上报的时间戳（扩展按 20 秒时效读取，断了上报就视为关闭）
+                if let self { JevLiveStore.setKeyboardPanel(fraction: self.panelFraction) }
                 self?.liveTick()
             }
         }
@@ -120,6 +124,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillDisappear(animated)
         liveTimer?.invalidate()
         liveTimer = nil
+        JevLiveStore.setKeyboardPanel(fraction: 0)   // 面板没了，扩展不用再抬底部裁剪
     }
 
     private func liveTick() {
@@ -289,6 +294,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // 上报面板高度比例：键盘一开聊天区底部就被面板盖住，扩展识别区必须同步抬高，
+        // 否则键盘自己的按钮文字（含上一轮目标）会被 OCR 进快照形成自反馈回路
+        let screenH = UIScreen.main.bounds.height
+        if screenH > 0 {
+            panelFraction = Double(view.bounds.height / screenH)
+            JevLiveStore.setKeyboardPanel(fraction: panelFraction)
+        }
         coverContainerGap()               // 铺开后如果容器比视图高，就补高盖住（通常量到的是等高）
         let width = view.bounds.width
         guard width > 0, lastFit == nil || lastFit!.mode != mode || lastFit!.width != width else { return }
@@ -405,7 +417,8 @@ final class KeyboardViewController: UIInputViewController {
             // 目标列表：主目标（当前帧尾部；空帧时退回累积历史最近一条）+ 至多两条更早的。
             // 拆开写不死类型检查器：数组拼接 + dropFirst + filter + prefix 一口气写会炸。
             var targets: [String] = [primary]
-            for older in (snap?.recent ?? []).dropFirst() where older != primary && targets.count < 3 {
+            for older in (snap?.recent ?? []).dropFirst()
+            where !LiveChatParser.areSameMessage(older, primary) && targets.count < 3 {
                 targets.append(older)
             }
             for (index, message) in targets.enumerated() {

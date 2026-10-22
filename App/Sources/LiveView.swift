@@ -43,6 +43,8 @@ struct LiveView: View {
             }
             .navigationTitle(L("直播", "Live"))
             .navigationViewStyle(.stack)
+            .onAppear { JevLiveStore.setAppLiveVisible(true) }
+            .onDisappear { JevLiveStore.setAppLiveVisible(false) }
             .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
                 tick()
             }
@@ -237,6 +239,8 @@ struct LiveView: View {
     // MARK: 轮询 + 自动分析
 
     private func tick() {
+        // 续期「直播页在前台」标记（扩展按 5 秒时效读取，秒级续期；退后台自然过期）
+        JevLiveStore.setAppLiveVisible(true)
         let snap = JevLiveStore.load()
         snapshot = snap
         guard autoAnalyze, !analyzing,

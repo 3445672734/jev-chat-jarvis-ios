@@ -82,7 +82,7 @@ func run(_ level: VNRequestTextRecognitionLevel) -> ([LiveLine], Double) {
     req.usesLanguageCorrection = false
     req.recognitionLanguages = ["zh-Hans", "en-US"]
     req.minimumTextHeight = 0.015
-    req.regionOfInterest = LiveOCREngine.regionOfInterest
+    req.regionOfInterest = LiveOCREngine.regionOfInterest()
     let t0 = Date()
     try? handler.perform([req])
     let dt = Date().timeIntervalSince(t0)
@@ -142,6 +142,22 @@ check(clusters == ["丁", "丙一\n丙二", "甲"],
       "incomingClusters 自底向上收全簇（多行合并、系统行当边界），实际：\(clusters)")
 let merged = JevLiveStore.mergingRecent(existing: ["丁"], found: clusters, cap: 3)
 check(merged == ["丁", "丙一\n丙二", "甲"], "mergingRecent 新者在前、跨帧去重，实际：\(merged)")
+
+// 模糊去重（2026-10-22 用户实测：「回复更早」出现两条一样的消息——键盘按钮文字被
+// OCR 喂回快照的自反馈 + OCR 逐帧抖动绕过了精确去重）
+let variants = [
+    "市面上产品太多了 fish WiZzard 更新了拉一把，确实有崩溃",
+    "市面上产品太多了 fish WiZzard 更新了 拉一\n把，确实有崩溃",      // 断行/空格不同
+    "市面上产品太多了 fish Wizzard 更新了拉一把，确实有崩溃…",        // 逐字抖动+截断
+]
+let deduped = JevLiveStore.mergingRecent(existing: [], found: variants)
+check(deduped.count == 1, "同一句话的识别变体（空格/断行/大小写/逐字抖动）只留一条，实际 \(deduped.count) 条")
+check(deduped.first?.contains("有崩溃") == true, "保留的是内容完整的版本")
+check(JevLiveStore.mergingRecent(existing: ["好的"], found: ["好的我现在出发"]).count == 2,
+      "短消息的包含/近似关系不并入，真不同的消息都保留")
+check(LiveChatParser.areSameMessage("这数字挺有意思，你这是在暗示什么吗？",
+                                    "这数字挺有意思,你这是在暗示什么吗"),
+      "中英文标点混排的同一句话视为相同")
 let snapHist = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: hist, frameCount: 1, recent: merged)
 check(snapHist.latestIncoming == "丁", "滚动到历史片段时主目标退回 recent.first，实际：\(snapHist.latestIncoming ?? "nil")")
 
