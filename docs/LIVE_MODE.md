@@ -15,9 +15,9 @@
   → ReplayKit 广播扩展（JevLive）收到全屏帧
   → 每 2 秒取一帧，Vision 本地 OCR（accurate 档，zh-Hans）
   → LiveChatParser 按气泡横向位置分「我方/对方」，洗掉时间戳/底部 UI
-  → 快照写 App Group（UserDefaults，画面变化才写）
+  → 快照写 App Group（UserDefaults，每 2 秒心跳落盘：updatedAt=活着，changedAt=画面内容变化）
   → 键盘待机页亮「读屏幕分析：「<对方最新一条>」」按钮，一键走 JevPipeline
-  → 或主 App「直播」页前台时自动分析（防抖 2.5 秒），候选点一下复制
+  → 或主 App「直播」页手动分析（自动分析默认关、前台才可用，防抖 2.5 秒），候选点一下复制
 ```
 
 `message` = 尾部连续的对方气泡（多行合并），`context` = 之前 14 行带说话人前缀——

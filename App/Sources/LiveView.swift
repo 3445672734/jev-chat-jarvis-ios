@@ -18,7 +18,9 @@ struct LiveView: View {
     }
 
     @State private var snapshot: LiveSnapshot?
-    @State private var autoAnalyze = true
+    /// 默认关：隐私口径（README/审核话术）承诺「只有你触发分析时文本才出设备」，
+    /// 自动分析是显式 opt-in，避免默认静默把 OCR 文本发往模型端点烧 token。
+    @State private var autoAnalyze = false
     @State private var analysis: Analysis?
     @State private var analyzing = false
     @State private var lastAnalyzed = ""
@@ -178,8 +180,8 @@ struct LiveView: View {
         } header: {
             Text(L("建议", "Suggestions"))
         } footer: {
-            Text(L("App 在前台时才会自动分析；锁屏或切走后由键盘接管——切到 Jev 键盘点「读屏幕分析」即可，同样免复制。",
-                   "Auto-analyze runs only while the app is in the foreground; otherwise the keyboard takes over — switch to the Jev keyboard and tap \"Read screen\"."))
+            Text(L("自动分析默认关闭、且只在 App 前台时运行；锁屏或切走后由键盘接管——切到 Jev 键盘点「读屏幕分析」即可，同样免复制。",
+                   "Auto-analyze is off by default and runs only while the app is in the foreground; otherwise the keyboard takes over — switch to the Jev keyboard and tap \"Read screen\"."))
         }
     }
 
@@ -196,6 +198,14 @@ struct LiveView: View {
             }
             PhotosPicker(selection: $pickedItem, matching: .images) {
                 Label(L("从相册选聊天截图识别", "Pick a chat screenshot from Photos"), systemImage: "photo.on.rectangle")
+            }
+            if let debugImage {
+                // 把喂给 OCR 的原图摆出来，和下面的识别结果对照看左右归属/清洗对不对
+                Image(uiImage: debugImage)
+                    .resizable().aspectRatio(contentMode: .fit)
+                    .frame(maxHeight: 240)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("debugImage")
             }
             if !debugLines.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {

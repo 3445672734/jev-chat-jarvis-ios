@@ -388,7 +388,9 @@ final class KeyboardViewController: UIInputViewController {
         var rows: [UIView] = []
         let liveOn = Self.liveActive()
         if liveOn, let snap = JevLiveStore.load(), let latest = snap.latestIncoming {
-            let preview = String(latest.prefix(16)) + (latest.count > 16 ? "…" : "")
+            // 多行消息在快照里以 \n 合并，按钮标题是单行的，换成空格再截断
+            let flattened = latest.replacingOccurrences(of: "\n", with: " ")
+            let preview = String(flattened.prefix(16)) + (flattened.count > 16 ? "…" : "")
             let liveBtn = KB.button(L("读屏幕分析：「\(preview)」", "Read screen: \"\(preview)\""),
                                     icon: "dot.radiowaves.left.and.right", primary: true,
                                     font: .systemFont(ofSize: 14, weight: .semibold))

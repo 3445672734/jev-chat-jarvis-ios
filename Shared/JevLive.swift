@@ -192,16 +192,17 @@ enum JevLiveStore {
         return true
     }
 
-    #if DEBUG
     /// 扩展侧自检日志。广播扩展连 Xcode 控制台都看不着，出问题全靠这一条通道
     /// （与 JevStore.diag 共用同一个 key：App/键盘/扩展三个进程谁写的都能读到）。
+    /// 不做 DEBUG 门控：LiveBroadcastHandler 无条件调用它，而 Release/Archive 配置下
+    /// DEBUG 编译条件不存在，门控会让 0.2.0 起的重提 Archive 直接编译失败；
+    /// 每次只写几百字节，Release 留着它正好排查真机 50MB 内存问题。
     static func diag(_ line: String) {
         let stamp = String(format: "%.3f", Date().timeIntervalSince1970)
         let prev = defaults.string(forKey: "jev.diag.v1") ?? ""
         defaults.set(String((prev + "[\(stamp)] [直播] \(line)\n").suffix(6000)),
                      forKey: "jev.diag.v1")
     }
-    #endif
 }
 
 // MARK: - OCR 引擎（广播扩展与自检页共用的同一条识别路径）
