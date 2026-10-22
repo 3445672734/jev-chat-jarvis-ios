@@ -49,7 +49,7 @@ There is also an **Analyze input text** button for drafts you are unsure about (
 
 Don't want to long-press-copy every message? On the app's **Live** tab tap the system broadcast button → pick **Jev Live** → Start Broadcast:
 
-1. The broadcast upload extension (`JevLive`) samples one frame every 2 seconds and runs **on-device Vision OCR** (accurate tier, Chinese), splits bubbles into "them / me" by horizontal position, and strips timestamps and bottom-bar UI
+1. The broadcast upload extension (`JevLive`) samples one frame every 2 seconds and runs **on-device Vision OCR** (accurate tier, Chinese), splits bubbles into "them / me" by horizontal position, and strips timestamps and bottom-bar UI. **Conversation gating included**: recognition only produces content when both sides' bubbles are visible (a real chat); switch to Settings/Photos and nothing is recognized (iOS exposes no "current foreground app" API, so a per-app allow-list is impossible — this is the strongest approximation)
 2. The snapshot goes into the App Group: the Live tab reconstructs the conversation in real time, and the idle keyboard lights up a "Read screen: '…their latest message…'" button plus an "Earlier" list — the extension watches while you scroll through chat history, so older messages can be picked too. Tap once for candidates, no clipboard involved
 3. OCR happens entirely on-device; only when you trigger an analysis does the recognized text go to the model endpoint you configured. iOS shows the purple recording indicator the whole time; stop from Control Center
 

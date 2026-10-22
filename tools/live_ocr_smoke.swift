@@ -139,6 +139,15 @@ let merged = JevLiveStore.mergingRecent(existing: ["丁"], found: clusters, cap:
 check(merged == ["丁", "丙一\n丙二", "甲"], "mergingRecent 新者在前、跨帧去重，实际：\(merged)")
 let snapHist = LiveSnapshot(updatedAt: Date(), changedAt: Date(), lines: hist, frameCount: 1, recent: merged)
 check(snapHist.latestIncoming == "丁", "滚动到历史片段时主目标退回 recent.first，实际：\(snapHist.latestIncoming ?? "nil")")
+
+// 会话门控（2026-10-22 用户隐私诉求：非聊天画面不产生识别内容）
+check(LiveChatParser.looksLikeConversation([.init(side: .them, text: "在吗"), .init(side: .me, text: "嗯")]),
+      "两侧气泡都在 = 会话")
+check(!LiveChatParser.looksLikeConversation([.init(side: .them, text: "甲"), .init(side: .them, text: "乙")]),
+      "只有单侧气泡（纯对方）不是会话——防止单列 UI 误入")
+check(!LiveChatParser.looksLikeConversation([.init(side: .me, text: "甲"), .init(side: .me, text: "乙")]),
+      "只有单侧气泡（纯我方）不是会话")
+check(!LiveChatParser.looksLikeConversation([]), "空画面不是会话")
 check(lines.first?.side == .them, "第一行归属对方（左）")
 let lastMe = lines.filter { $0.side == .me }.last
 check(lastMe?.text.contains("好嘞") == true, "最后一条我方消息为「好嘞」")

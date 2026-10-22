@@ -112,6 +112,12 @@ struct LiveView: View {
 
     private func conversationSection(_ snap: LiveSnapshot) -> some View {
         Section {
+            if snap.lines.isEmpty {
+                // 会话门控：非聊天画面只发心跳、不产生识别内容（README/LIVE_MODE 有说明）
+                Text(L("当前画面不像聊天界面，不产生识别内容；切回聊天自动恢复。",
+                       "This screen doesn't look like a chat, so nothing is recognized. Switch back to a chat to resume."))
+                    .font(.caption).foregroundColor(.secondary)
+            }
             ForEach(Array(snap.lines.suffix(8).enumerated()), id: \.offset) { _, line in
                 HStack {
                     if line.side == .me { Spacer(minLength: 40) }

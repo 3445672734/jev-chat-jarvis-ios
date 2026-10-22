@@ -53,17 +53,20 @@ final class LiveBroadcastHandler: RPBroadcastSampleHandler {
         }
 
         // 心跳每拍都落盘（payload ~2KB，开销可忽略）；changedAt 只在内容真变了时推进。
-        // recent 跨帧累积本帧看到的对方消息簇：键盘弹出时聊天会自动滚到最底、当前帧
-        // 常常只剩用户自己的消息，但扩展在用户滚动浏览历史时每帧都看得到——
-        // 累积起来键盘才能让用户挑「更早的消息」回复（2026-10-22 用户实测需求）。
-        let signature = lines.map(\.text).joined(separator: "|")
+        // 会话门控：只有「长得像双人聊天」的画面才产生识别内容（lines 落快照、recent 累积）；
+        // 其他画面（设置/相册/网页…）只发心跳、清空识别结果、recent 冻结保留——
+        // 广播期间用户切去别的 App，不该在快照里留下那个 App 的内容（2026-10-22 用户隐私诉求）。
+        // recent 冻结而非清空：从别的 App 切回聊天，历史目标不丢，键盘按钮不闪没。
+        let conversation = LiveChatParser.looksLikeConversation(lines)
+        let signature = conversation ? lines.map(\.text).joined(separator: "|") : ""
         if signature != lastSignature { changedAt = now }
         lastSignature = signature
-        let recent = JevLiveStore.mergingRecent(
-            existing: JevLiveStore.load()?.recent ?? [],
-            found: LiveChatParser.incomingClusters(in: lines))
+        let recent = conversation
+            ? JevLiveStore.mergingRecent(existing: JevLiveStore.load()?.recent ?? [],
+                                         found: LiveChatParser.incomingClusters(in: lines))
+            : (JevLiveStore.load()?.recent ?? [])
         JevLiveStore.save(LiveSnapshot(updatedAt: now, changedAt: changedAt,
-                                       lines: Array(lines.suffix(40)), frameCount: framesSeen,
-                                       recent: recent))
+                                       lines: conversation ? Array(lines.suffix(40)) : [],
+                                       frameCount: framesSeen, recent: recent))
     }
 }

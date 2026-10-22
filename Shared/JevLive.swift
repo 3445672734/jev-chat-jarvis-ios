@@ -185,6 +185,20 @@ enum LiveChatParser {
         }
         return Array(clusters.prefix(4))
     }
+
+    /// 会话画面门控：广播扩展拿不到「当前前台 App」（iOS 不提供该 API，按 App 白名单
+    /// 过滤做不到，见 docs/LIVE_MODE.md 第五节），退而求其次——只把「长得像双人聊天」
+    /// 的画面当会话：我方与对方两侧气泡同时在场。真实聊天几乎总满足（有来才有回）；
+    /// 设置/相册/网页等单列画面几乎不会同时出现左右两种气泡。2026-10-22 用户提出
+    /// 「不是在聊天 App 里也一直 OCR」后的隐私收口。
+    static func looksLikeConversation(_ lines: [LiveLine]) -> Bool {
+        var them = 0, me = 0
+        for line in lines {
+            if line.side == .them { them += 1 }
+            else if line.side == .me { me += 1 }
+        }
+        return them >= 1 && me >= 1
+    }
 }
 
 // MARK: - App Group 存储
