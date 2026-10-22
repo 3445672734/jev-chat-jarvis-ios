@@ -280,11 +280,13 @@ enum JevLiveStore {
 
 enum LiveOCREngine {
 
-    /// 只识别聊天区：裁掉顶部状态栏 (~5%) 与底部输入条 (~14%)（Vision 原点左下）。
-    /// 少一半图面 = 少一半识别耗时，也避免把「发送」按钮认成对话。
+    /// 只识别聊天区：裁掉顶部状态栏+导航栏 (~12%) 与底部输入条 (~14%)（Vision 原点左下）。
+    /// 顶部 5% 不够——群聊名称显示在导航栏里（约在顶部 9-11% 处），居中显示会被判成
+    /// 「对方」混进待回目标（2026-10-22 用户实测：按钮读出了群名「732-…」），
+    /// 提到 12% 把状态栏+导航栏整条排除。少一半图面 = 少一半识别耗时。
     /// 注意：设了 regionOfInterest 后，结果的 boundingBox 是相对该区域的归一化坐标——
     /// 我们只用 midX 定左右、midY 排序，两种坐标系下结论一致。
-    static let regionOfInterest = CGRect(x: 0, y: 0.14, width: 1, height: 0.81)
+    static let regionOfInterest = CGRect(x: 0, y: 0.14, width: 1, height: 0.74)
 
     static func recognize(pixelBuffer: CVPixelBuffer) -> [LiveLine] {
         var lines: [LiveLine] = []

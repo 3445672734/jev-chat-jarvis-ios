@@ -410,15 +410,18 @@ final class KeyboardViewController: UIInputViewController {
             }
             for (index, message) in targets.enumerated() {
                 let flattened = message.replacingOccurrences(of: "\n", with: " ")
-                let preview = String(flattened.prefix(16)) + (flattened.count > 16 ? "…" : "")
+                // 预览给到 ~34 字 + 两行折行：用户必须能分清按钮对应的是哪条消息
+                //（2026-10-22 用户反馈 16 字截断「根本看不清楚回复哪一条内容，点不到」）
+                let preview = String(flattened.prefix(34)) + (flattened.count > 34 ? "…" : "")
                 let label = index == 0
                     ? L("读屏幕分析：「\(preview)」", "Read screen: \"\(preview)\"")
                     : L("回复更早：「\(preview)」", "Earlier: \"\(preview)\"")
                 let btn = KB.button(label,
                                     icon: index == 0 ? "dot.radiowaves.left.and.right" : "clock.arrow.circlepath",
                                     primary: index == 0,
-                                    font: .systemFont(ofSize: 14, weight: .semibold))
-                btn.heightAnchor.constraint(equalToConstant: index == 0 ? 44 : 38).isActive = true
+                                    font: .systemFont(ofSize: 13, weight: .semibold),
+                                    wraps: true)
+                btn.heightAnchor.constraint(equalToConstant: index == 0 ? 56 : 50).isActive = true
                 // 目标文本放 identifier 里传给 action（同话术格子的做法）
                 btn.accessibilityIdentifier = message
                 btn.addTarget(self, action: #selector(analyzeTarget(_:)), for: .touchUpInside)
