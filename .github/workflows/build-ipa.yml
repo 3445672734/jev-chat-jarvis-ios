@@ -25,8 +25,9 @@ jobs:
           brew install xcodegen >/dev/null 2>&1 || true
           xcodegen generate || echo "::warning::xcodegen failed, using committed xcodeproj"
 
-      # Xcode 16 / iOS 18.5 SDK 涓嶅厑璁?ad-hoc 绛惧悕锛屽彧鑳藉厛鏃犵鍚嶅綊妗ｏ紝
-      # 鍐嶇敤 codesign CLI 鎵嬪姩琛?ad-hoc 绛惧悕 + entitlements锛圓pp Group 闈犲畠锛夈€?      - name: Archive (unsigned)
+      # Xcode 16 / iOS 18.5 SDK rejects ad-hoc signing: archive unsigned,
+      # then add ad-hoc signature + entitlements (App Group) via codesign CLI.
+      - name: Archive (unsigned)
         run: |
           mkdir -p build
           ARCHIVE="$PWD/build/JevJarvis.xcarchive"
