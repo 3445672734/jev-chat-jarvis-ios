@@ -25,31 +25,49 @@ jobs:
           brew install xcodegen >/dev/null 2>&1 || true
           xcodegen generate || echo "::warning::xcodegen failed, using committed xcodeproj"
 
-      - name: Archive (ad-hoc signed, entitlements kept)
+      # Xcode 16 / iOS 18.5 SDK 涓嶅厑璁?ad-hoc 绛惧悕锛屽彧鑳藉厛鏃犵鍚嶅綊妗ｏ紝
+      # 鍐嶇敤 codesign CLI 鎵嬪姩琛?ad-hoc 绛惧悕 + entitlements锛圓pp Group 闈犲畠锛夈€?      - name: Archive (unsigned)
         run: |
-          set -uo pipefail
           mkdir -p build
           ARCHIVE="$PWD/build/JevJarvis.xcarchive"
+          set +e
           xcodebuild \
             -project JevJarvis.xcodeproj -scheme JevJarvis -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE" -derivedDataPath "$PWD/build/dd" \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
-            PROVISIONING_PROFILE_SPECIFIER="" DEVELOPMENT_TEAM="" \
-            2>&1 | tee build/archive-adhoc.log | tail -n 40
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            > build/archive.log 2>&1
+          XC=$?
+          set -e
+          tail -n 60 build/archive.log
           if [ ! -d "$ARCHIVE/Products/Applications/JevJarvis.app" ]; then
-            echo "::warning::ad-hoc archive failed, falling back to fully unsigned build"
-            rm -rf "$ARCHIVE"
-            xcodebuild \
-              -project JevJarvis.xcodeproj -scheme JevJarvis -configuration Release \
-              -sdk iphoneos -destination 'generic/platform=iOS' \
-              -archivePath "$ARCHIVE" -derivedDataPath "$PWD/build/dd" \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
-              2>&1 | tee build/archive-unsigned.log | tail -n 40
+            echo "::error::archive failed (xcodebuild exit $XC), see build-logs artifact"
+            exit 1
           fi
-          test -d "$ARCHIVE/Products/Applications/JevJarvis.app"
+
+      - name: Ad-hoc sign with entitlements
+        run: |
+          set -uo pipefail
+          APP="build/JevJarvis.xcarchive/Products/Applications/JevJarvis.app"
+          sign() {
+            local bundle="$1" ent="$2"
+            if [ ! -e "$bundle" ]; then echo "skip $bundle"; return 0; fi
+            if [ -f "$ent" ]; then
+              codesign --force --sign - --timestamp=none --entitlements "$ent" "$bundle" \
+                && echo "ok: $bundle (+ entitlements)" \
+                || echo "::warning::codesign failed: $bundle"
+            else
+              codesign --force --sign - --timestamp=none "$bundle" \
+                && echo "ok: $bundle" || echo "::warning::codesign failed: $bundle"
+            fi
+          }
+          sign "$APP/PlugIns/JevLive.appex"     Broadcast/JevLive.entitlements
+          sign "$APP/PlugIns/JevKeyboard.appex" Keyboard/JevKeyboard.entitlements
+          sign "$APP"                           App/JevJarvis.entitlements
+          echo "--- app entitlements ---"
+          codesign -d --entitlements :- "$APP" 2>&1 | head -30 || true
+          codesign --verify --deep --strict "$APP" && echo "verify: ok" || echo "::warning::codesign verify failed (IPA still usable for re-sign)"
 
       - name: Package Payload/*.ipa
         run: |
@@ -59,11 +77,9 @@ jobs:
           cp -R "$APP" build/Payload/
           echo "--- embedded extensions ---"
           ls -1 build/Payload/JevJarvis.app/PlugIns || true
-          echo "--- entitlements ---"
-          codesign -d --entitlements :- build/Payload/JevJarvis.app 2>&1 | head -20 || true
           cd build && zip -qry JevJarvis-unsigned.ipa Payload
           ls -lh JevJarvis-unsigned.ipa
-          unzip -l JevJarvis-unsigned.ipa | head -20
+          unzip -l JevJarvis-unsigned.ipa | head -15
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -78,7 +94,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: |
-            build/archive-*.log
+          path: build/archive.log
           if-no-files-found: ignore
           retention-days: 7
