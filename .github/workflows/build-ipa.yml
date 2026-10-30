@@ -1,0 +1,84 @@
+name: build-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version || true
+
+      - name: Regenerate project (optional)
+        run: |
+          brew install xcodegen >/dev/null 2>&1 || true
+          xcodegen generate || echo "::warning::xcodegen failed, using committed xcodeproj"
+
+      - name: Archive (ad-hoc signed, entitlements kept)
+        run: |
+          set -uo pipefail
+          mkdir -p build
+          ARCHIVE="$PWD/build/JevJarvis.xcarchive"
+          xcodebuild \
+            -project JevJarvis.xcodeproj -scheme JevJarvis -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE" -derivedDataPath "$PWD/build/dd" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            PROVISIONING_PROFILE_SPECIFIER="" DEVELOPMENT_TEAM="" \
+            2>&1 | tee build/archive-adhoc.log | tail -n 40
+          if [ ! -d "$ARCHIVE/Products/Applications/JevJarvis.app" ]; then
+            echo "::warning::ad-hoc archive failed, falling back to fully unsigned build"
+            rm -rf "$ARCHIVE"
+            xcodebuild \
+              -project JevJarvis.xcodeproj -scheme JevJarvis -configuration Release \
+              -sdk iphoneos -destination 'generic/platform=iOS' \
+              -archivePath "$ARCHIVE" -derivedDataPath "$PWD/build/dd" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+              2>&1 | tee build/archive-unsigned.log | tail -n 40
+          fi
+          test -d "$ARCHIVE/Products/Applications/JevJarvis.app"
+
+      - name: Package Payload/*.ipa
+        run: |
+          set -euo pipefail
+          APP="build/JevJarvis.xcarchive/Products/Applications/JevJarvis.app"
+          rm -rf build/Payload && mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          echo "--- embedded extensions ---"
+          ls -1 build/Payload/JevJarvis.app/PlugIns || true
+          echo "--- entitlements ---"
+          codesign -d --entitlements :- build/Payload/JevJarvis.app 2>&1 | head -20 || true
+          cd build && zip -qry JevJarvis-unsigned.ipa Payload
+          ls -lh JevJarvis-unsigned.ipa
+          unzip -l JevJarvis-unsigned.ipa | head -20
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: JevJarvis-ipa
+          path: build/JevJarvis-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/archive-*.log
+          if-no-files-found: ignore
+          retention-days: 7
